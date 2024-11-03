@@ -22,6 +22,15 @@ async function loadConfig(configPath = "./config.json") {
     }
 }
 
+// Helper function to truncate comment text to 50 words
+function truncateText(text, wordLimit = 50) {
+    const words = text.split(" ");
+    if (words.length <= wordLimit) {
+        return text;
+    }
+    return words.slice(0, wordLimit).join(" ") + "...";
+}
+
 // Fetch PR review comments with reactions
 async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) {
     const rows = []; // Array to hold each comment's data for Excel
@@ -35,8 +44,18 @@ async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) 
         });
 
         for (const comment of comments) {
-            const { id: commentId, body: commentText } = comment;
-            const row = { CommentText: commentText };
+            const { id: commentId, body: commentText, html_url: commentUrl } = comment;
+            const truncatedText = truncateText(commentText);
+
+            // Use HYPERLINK formula to make the truncated text clickable
+            const row = {
+                Comment: {
+                    f: `HYPERLINK("${commentUrl}", "${truncatedText.replace(
+                        /"/g,
+                        '""',
+                    )}")`,
+                }, // Escaping quotes for Excel
+            };
 
             // Fetch reactions for each comment
             const { data: reactions } =
@@ -101,15 +120,15 @@ async function main(configPath) {
             pullRequestNumber,
         );
 
-        // Create a worksheet for this PR and add it to the workbook
-        const worksheet = xlsx.utils.json_to_sheet(rows);
+        // Create a worksheet manually with HYPERLINK formulas for clickable text
+        const worksheet = xlsx.utils.json_to_sheet(rows, { raw: true });
         const sheetName = `${repo}-PR#${pullRequestNumber}`;
         xlsx.utils.book_append_sheet(workbook, worksheet, sheetName.substring(0, 31)); // Sheet names are limited to 31 chars
     }
 
-    // Write workbook to file
+    // Write workbook to file with the name "Review.xlsx"
     xlsx.writeFile(workbook, "Review.xlsx");
-    console.log("Review.xlsx");
+    console.log("Excel file created: Review.xlsx");
 }
 
 // Run the main function, allowing config path to be provided as a command-line argument
