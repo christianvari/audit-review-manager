@@ -47,9 +47,12 @@ async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) 
             const { id: commentId, body: commentText, html_url: commentUrl } = comment;
             const truncatedText = truncateText(commentText);
 
+            // Decode URL to ensure "#" is used instead of "%23"
+            const decodedUrl = decodeURIComponent(commentUrl);
+
             // Row with the clickable comment text as a hyperlink
             const row = {
-                Comment: { text: truncatedText, hyperlink: commentUrl }, // Use decoded URL
+                Comment: { text: truncatedText, hyperlink: decodedUrl }, // Use decoded URL
             };
 
             // Fetch reactions for each comment
@@ -60,15 +63,36 @@ async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) 
                     comment_id: commentId,
                 });
 
-            // Process reactions and add to row
+            // Process reactions and count reactions per user
+            const reactionCounts = {};
             reactions.forEach((reaction) => {
-                const emoji = getEmoji(reaction.content);
                 const user = reaction.user.login;
+                const emoji = getEmoji(reaction.content);
 
-                // Add user and their emoji to the row
-                row[user] = emoji;
+                if (!reactionCounts[user]) {
+                    reactionCounts[user] = [];
+                }
+                reactionCounts[user].push(emoji);
             });
 
+            // Add reactions to the row and check for 👍 and 👎 reactions
+            let thumbsUpCount = 0;
+            let thumbsDownCount = 0;
+            const totalCommenters = Object.keys(reactionCounts).length;
+
+            Object.keys(reactionCounts).forEach((user) => {
+                const userReactions = reactionCounts[user];
+                const emojiString = userReactions.join(" ");
+                row[user] = emojiString;
+
+                // Count 👍 and 👎 reactions
+                if (userReactions.includes("👍")) thumbsUpCount += 1;
+                if (userReactions.includes("👎")) thumbsDownCount += 1;
+            });
+
+            // Set highlight flags based on conditions
+            row.highlightGreen = thumbsUpCount > (2 / 3) * totalCommenters;
+            row.highlightRed = thumbsDownCount > (2 / 3) * totalCommenters;
             rows.push(row);
         }
     } catch (error) {
@@ -120,7 +144,9 @@ async function main(configPath) {
         });
 
         // Add headers
-        const headerRow = Object.keys(rows[0]);
+        const headerRow = Object.keys(rows[0]).filter(
+            (key) => key !== "highlightGreen" && key !== "highlightRed",
+        ); // Exclude helper fields
         worksheet.columns = headerRow.map((key) => ({
             header: key,
             key: key,
@@ -136,7 +162,7 @@ async function main(configPath) {
         };
 
         // Add rows and hyperlinks
-        rows.forEach((dataRow) => {
+        rows.forEach((dataRow, index) => {
             const row = worksheet.addRow(dataRow);
 
             // Format comment column as clickable hyperlink
@@ -144,10 +170,31 @@ async function main(configPath) {
             commentCell.value = {
                 text: dataRow.Comment.text,
                 hyperlink: dataRow.Comment.hyperlink,
-                tooltip: dataRow.Comment.hyperlink,
             };
             commentCell.font = { color: { argb: "FF0000FF" }, underline: true }; // Blue and underlined
             commentCell.alignment = { wrapText: true };
+
+            // Highlight row in light green if > 2/3 of commenters gave a 👍
+            if (dataRow.highlightGreen) {
+                row.eachCell((cell) => {
+                    cell.fill = {
+                        type: "pattern",
+                        pattern: "solid",
+                        fgColor: { argb: "CCFFCC" }, // Light green background
+                    };
+                });
+            }
+
+            // Highlight row in light red if > 2/3 of commenters gave a 👎
+            if (dataRow.highlightRed) {
+                row.eachCell((cell) => {
+                    cell.fill = {
+                        type: "pattern",
+                        pattern: "solid",
+                        fgColor: { argb: "FFCCCC" }, // Light red background
+                    };
+                });
+            }
         });
 
         // Auto-adjust column widths based on content
