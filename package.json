@@ -1,7 +1,12 @@
 {
-  "dependencies": {
-    "@octokit/rest": "^21.0.2",
-    "dotenv": "^16.4.5",
-    "xlsx": "^0.18.5"
-  }
+    "main": "main.js",
+    "type": "module",
+    "scripts": {
+        "start": "node main.js"
+    },
+    "dependencies": {
+        "@octokit/rest": "^21.0.2",
+        "dotenv": "^16.4.5",
+        "xlsx": "^0.18.5"
+    }
 }
