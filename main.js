@@ -1,7 +1,7 @@
 import { Octokit } from "@octokit/rest";
 import fs from "fs/promises";
 import path from "path";
-import xlsx from "xlsx";
+import ExcelJS from "exceljs";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -47,14 +47,9 @@ async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) 
             const { id: commentId, body: commentText, html_url: commentUrl } = comment;
             const truncatedText = truncateText(commentText);
 
-            // Use HYPERLINK formula to make the truncated text clickable
+            // Row with the clickable comment text as a hyperlink
             const row = {
-                Comment: {
-                    f: `HYPERLINK("${commentUrl}", "${truncatedText.replace(
-                        /"/g,
-                        '""',
-                    )}")`,
-                }, // Escaping quotes for Excel
+                Comment: { text: truncatedText, hyperlink: commentUrl }, // Use decoded URL
             };
 
             // Fetch reactions for each comment
@@ -110,7 +105,7 @@ async function main(configPath) {
         return;
     }
 
-    const workbook = xlsx.utils.book_new(); // Create a new workbook
+    const workbook = new ExcelJS.Workbook();
 
     for (const { owner, repo, pullRequestNumber } of config) {
         console.log(`\nProcessing ${owner}/${repo} - Pull Request #${pullRequestNumber}`);
@@ -120,14 +115,54 @@ async function main(configPath) {
             pullRequestNumber,
         );
 
-        // Create a worksheet manually with HYPERLINK formulas for clickable text
-        const worksheet = xlsx.utils.json_to_sheet(rows, { raw: true });
-        const sheetName = `${repo}-PR#${pullRequestNumber}`;
-        xlsx.utils.book_append_sheet(workbook, worksheet, sheetName.substring(0, 31)); // Sheet names are limited to 31 chars
+        const worksheet = workbook.addWorksheet(`${repo}-PR#${pullRequestNumber}`, {
+            properties: { defaultRowHeight: 20 },
+        });
+
+        // Add headers
+        const headerRow = Object.keys(rows[0]);
+        worksheet.columns = headerRow.map((key) => ({
+            header: key,
+            key: key,
+            width: 25, // Default width, will auto-adjust later
+        }));
+
+        // Style header row
+        worksheet.getRow(1).font = { bold: true };
+        worksheet.getRow(1).alignment = {
+            vertical: "middle",
+            horizontal: "center",
+            wrapText: true,
+        };
+
+        // Add rows and hyperlinks
+        rows.forEach((dataRow) => {
+            const row = worksheet.addRow(dataRow);
+
+            // Format comment column as clickable hyperlink
+            const commentCell = row.getCell("Comment");
+            commentCell.value = {
+                text: dataRow.Comment.text,
+                hyperlink: dataRow.Comment.hyperlink,
+                tooltip: dataRow.Comment.hyperlink,
+            };
+            commentCell.font = { color: { argb: "FF0000FF" }, underline: true }; // Blue and underlined
+            commentCell.alignment = { wrapText: true };
+        });
+
+        // Auto-adjust column widths based on content
+        worksheet.columns.forEach((column) => {
+            let maxLength = 10;
+            column.eachCell({ includeEmpty: true }, (cell) => {
+                const cellLength = cell.value ? cell.value.toString().length : 10;
+                maxLength = Math.max(maxLength, cellLength);
+            });
+            column.width = maxLength + 5;
+        });
     }
 
     // Write workbook to file with the name "Review.xlsx"
-    xlsx.writeFile(workbook, "Review.xlsx");
+    await workbook.xlsx.writeFile("Review.xlsx");
     console.log("Excel file created: Review.xlsx");
 }
 
