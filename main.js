@@ -154,11 +154,11 @@ async function main(configPath) {
         worksheet.columns = headerRow.map((key, i) => ({
             header: key,
             key: key,
-            width: i == 0 ? 100 : 15, // Default width, will auto-adjust later
+            width: i == 0 ? 100 : 25, // Default width, will auto-adjust later
         }));
 
         // Style header row
-        worksheet.getRow(1).font = { bold: true };
+        worksheet.getRow(1).font = { bold: true, size: 16 };
         worksheet.getRow(1).alignment = {
             vertical: "middle",
             horizontal: "center",
@@ -168,6 +168,7 @@ async function main(configPath) {
         // Add rows and hyperlinks
         rows.forEach((dataRow) => {
             const row = worksheet.addRow(dataRow);
+            row.font = { size: 16 };
 
             // Format comment column as clickable hyperlink
             const commentCell = row.getCell("Comment");
@@ -175,8 +176,8 @@ async function main(configPath) {
                 text: dataRow.Comment.text,
                 hyperlink: dataRow.Comment.hyperlink,
             };
-            commentCell.font = { color: { argb: "FF0000FF" }, underline: true }; // Blue and underlined
-            commentCell.alignment = { wrapText: true };
+            commentCell.font = { color: { argb: "FF0000FF" }, underline: true, size: 16 }; // Blue and underlined
+            row.alignment = { vertical: "middle", wrapText: true };
 
             if (dataRow.thumbsUpCount + 1 > (2 / 3) * commenters.length) {
                 row.fill = {
