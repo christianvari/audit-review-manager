@@ -49,7 +49,13 @@ async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) 
                 body: commentText,
                 html_url: commentUrl,
                 user: user,
+                in_reply_to_id: skip,
             } = comment;
+
+            if (skip) {
+                continue;
+            }
+
             const truncatedText = truncateText(commentText);
 
             if (!commenters.includes(user.login)) {
