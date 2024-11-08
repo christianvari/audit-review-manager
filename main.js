@@ -23,36 +23,42 @@ async function loadConfig(configPath = "./config.json") {
 }
 
 // Helper function to truncate comment text to 50 words
-function truncateText(text, wordLimit = 50) {
-    const words = text.split(" ");
-    if (words.length <= wordLimit) {
+function truncateText(text, charLimit = 300) {
+    if (text.length <= charLimit) {
         return text;
     }
-    return words.slice(0, wordLimit).join(" ") + "...";
+    return text.slice(0, charLimit).concat("...");
 }
 
 // Fetch PR review comments with reactions
 async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) {
     const rows = []; // Array to hold each comment's data for Excel
-
+    const commenters = [];
     try {
         // Fetch review comments on the specified pull request
         const { data: comments } = await octokit.rest.pulls.listReviewComments({
             owner,
             repo,
             pull_number: pullRequestNumber,
+            per_page: 100,
         });
 
         for (const comment of comments) {
-            const { id: commentId, body: commentText, html_url: commentUrl } = comment;
+            const {
+                id: commentId,
+                body: commentText,
+                html_url: commentUrl,
+                user: user,
+            } = comment;
             const truncatedText = truncateText(commentText);
 
-            // Decode URL to ensure "#" is used instead of "%23"
-            const decodedUrl = decodeURIComponent(commentUrl);
+            if (!commenters.includes(user.login)) {
+                commenters.push(user.login);
+            }
 
             // Row with the clickable comment text as a hyperlink
             const row = {
-                Comment: { text: truncatedText, hyperlink: decodedUrl }, // Use decoded URL
+                Comment: { text: truncatedText, hyperlink: commentUrl }, // Use decoded URL
             };
 
             // Fetch reactions for each comment
@@ -76,9 +82,8 @@ async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) 
             });
 
             // Add reactions to the row and check for 👍 and 👎 reactions
-            let thumbsUpCount = 0;
-            let thumbsDownCount = 0;
-            const totalCommenters = Object.keys(reactionCounts).length;
+            row.thumbsUpCount = 0;
+            row.thumbsDownCount = 0;
 
             Object.keys(reactionCounts).forEach((user) => {
                 const userReactions = reactionCounts[user];
@@ -86,13 +91,10 @@ async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) 
                 row[user] = emojiString;
 
                 // Count 👍 and 👎 reactions
-                if (userReactions.includes("👍")) thumbsUpCount += 1;
-                if (userReactions.includes("👎")) thumbsDownCount += 1;
+                if (userReactions.includes("👍")) row.thumbsUpCount += 1;
+                if (userReactions.includes("👎")) row.thumbsDownCount += 1;
             });
 
-            // Set highlight flags based on conditions
-            row.highlightGreen = thumbsUpCount > (2 / 3) * totalCommenters;
-            row.highlightRed = thumbsDownCount > (2 / 3) * totalCommenters;
             rows.push(row);
         }
     } catch (error) {
@@ -102,7 +104,7 @@ async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) 
         );
     }
 
-    return rows;
+    return { rows, commenters };
 }
 
 // Function to map reaction content to emoji
@@ -133,24 +135,20 @@ async function main(configPath) {
 
     for (const { owner, repo, pullRequestNumber } of config) {
         console.log(`\nProcessing ${owner}/${repo} - Pull Request #${pullRequestNumber}`);
-        const rows = await getPRReviewCommentsWithReactions(
+        const { rows, commenters } = await getPRReviewCommentsWithReactions(
             owner,
             repo,
             pullRequestNumber,
         );
 
-        const worksheet = workbook.addWorksheet(`${repo}-PR#${pullRequestNumber}`, {
-            properties: { defaultRowHeight: 20 },
-        });
+        const worksheet = workbook.addWorksheet(`${repo}-PR#${pullRequestNumber}`);
 
         // Add headers
-        const headerRow = Object.keys(rows[0]).filter(
-            (key) => key !== "highlightGreen" && key !== "highlightRed",
-        ); // Exclude helper fields
-        worksheet.columns = headerRow.map((key) => ({
+        const headerRow = ["Comment", ...commenters];
+        worksheet.columns = headerRow.map((key, i) => ({
             header: key,
             key: key,
-            width: 25, // Default width, will auto-adjust later
+            width: i == 0 ? 100 : 15, // Default width, will auto-adjust later
         }));
 
         // Style header row
@@ -162,7 +160,7 @@ async function main(configPath) {
         };
 
         // Add rows and hyperlinks
-        rows.forEach((dataRow, index) => {
+        rows.forEach((dataRow) => {
             const row = worksheet.addRow(dataRow);
 
             // Format comment column as clickable hyperlink
@@ -174,37 +172,22 @@ async function main(configPath) {
             commentCell.font = { color: { argb: "FF0000FF" }, underline: true }; // Blue and underlined
             commentCell.alignment = { wrapText: true };
 
-            // Highlight row in light green if > 2/3 of commenters gave a 👍
-            if (dataRow.highlightGreen) {
-                row.eachCell((cell) => {
-                    cell.fill = {
-                        type: "pattern",
-                        pattern: "solid",
-                        fgColor: { argb: "CCFFCC" }, // Light green background
-                    };
-                });
+            if (dataRow.thumbsUpCount + 1 > (2 / 3) * commenters.length) {
+                row.fill = {
+                    type: "pattern",
+                    pattern: "solid",
+                    fgColor: { argb: "CCFFCC" },
+                };
             }
 
             // Highlight row in light red if > 2/3 of commenters gave a 👎
-            if (dataRow.highlightRed) {
-                row.eachCell((cell) => {
-                    cell.fill = {
-                        type: "pattern",
-                        pattern: "solid",
-                        fgColor: { argb: "FFCCCC" }, // Light red background
-                    };
-                });
+            if (dataRow.thumbsDownCount - 1 > (2 / 3) * commenters.length) {
+                row.fill = {
+                    type: "pattern",
+                    pattern: "solid",
+                    fgColor: { argb: "FFCCCC" },
+                };
             }
-        });
-
-        // Auto-adjust column widths based on content
-        worksheet.columns.forEach((column) => {
-            let maxLength = 10;
-            column.eachCell({ includeEmpty: true }, (cell) => {
-                const cellLength = cell.value ? cell.value.toString().length : 10;
-                maxLength = Math.max(maxLength, cellLength);
-            });
-            column.width = maxLength + 5;
         });
     }
 
