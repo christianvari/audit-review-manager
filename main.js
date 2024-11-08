@@ -48,7 +48,7 @@ async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) 
                 id: commentId,
                 body: commentText,
                 html_url: commentUrl,
-                user: user,
+                user: commenter,
                 in_reply_to_id: skip,
             } = comment;
 
@@ -58,8 +58,8 @@ async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) 
 
             const truncatedText = truncateText(commentText);
 
-            if (!commenters.includes(user.login)) {
-                commenters.push(user.login);
+            if (!commenters.includes(commenter.login)) {
+                commenters.push(commenter.login);
             }
 
             // Row with the clickable comment text as a hyperlink
@@ -76,29 +76,16 @@ async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) 
                 });
 
             // Process reactions and count reactions per user
-            const reactionCounts = {};
+            row.thumbsUpCount = 1;
+            row.thumbsDownCount = 0;
+            row[commenter.login] = "Proposer";
             reactions.forEach((reaction) => {
                 const user = reaction.user.login;
                 const emoji = getEmoji(reaction.content);
 
-                if (!reactionCounts[user]) {
-                    reactionCounts[user] = [];
-                }
-                reactionCounts[user].push(emoji);
-            });
-
-            // Add reactions to the row and check for 👍 and 👎 reactions
-            row.thumbsUpCount = 0;
-            row.thumbsDownCount = 0;
-
-            Object.keys(reactionCounts).forEach((user) => {
-                const userReactions = reactionCounts[user];
-                const emojiString = userReactions.join(" ");
-                row[user] = emojiString;
-
-                // Count 👍 and 👎 reactions
-                if (userReactions.includes("👍")) row.thumbsUpCount += 1;
-                if (userReactions.includes("👎")) row.thumbsDownCount += 1;
+                row[user] = emoji;
+                if (emoji === "👍") row.thumbsUpCount += 1;
+                if (emoji === "👎") row.thumbsDownCount += 1;
             });
 
             rows.push(row);
@@ -179,7 +166,7 @@ async function main(configPath) {
             commentCell.font = { color: { argb: "FF0000FF" }, underline: true, size: 16 }; // Blue and underlined
             row.alignment = { vertical: "middle", wrapText: true };
 
-            if (dataRow.thumbsUpCount + 1 > (2 / 3) * commenters.length) {
+            if (dataRow.thumbsUpCount > (2 / 3) * commenters.length) {
                 row.fill = {
                     type: "pattern",
                     pattern: "solid",
