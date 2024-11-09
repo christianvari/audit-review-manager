@@ -76,7 +76,7 @@ async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) 
                 });
 
             // Process reactions and count reactions per user
-            row.thumbsUpCount = 1;
+            row.thumbsUpCount = 0;
             row.thumbsDownCount = 0;
             row[commenter.login] = "Proposer";
             reactions.forEach((reaction) => {
@@ -166,7 +166,7 @@ async function main(configPath) {
             commentCell.font = { color: { argb: "FF0000FF" }, underline: true, size: 16 }; // Blue and underlined
             row.alignment = { vertical: "middle", wrapText: true };
 
-            if (dataRow.thumbsUpCount > (2 / 3) * commenters.length) {
+            if (dataRow.thumbsUpCount > (2 / 3) * commenters.length - 1) {
                 row.fill = {
                     type: "pattern",
                     pattern: "solid",
@@ -175,7 +175,7 @@ async function main(configPath) {
             }
 
             // Highlight row in light red if > 2/3 of commenters gave a 👎
-            if (dataRow.thumbsDownCount - 1 > (2 / 3) * commenters.length) {
+            if (dataRow.thumbsDownCount > (2 / 3) * commenters.length - 1) {
                 row.fill = {
                     type: "pattern",
                     pattern: "solid",
