@@ -83,6 +83,11 @@ async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) 
                 const user = reaction.user.login;
                 const emoji = getEmoji(reaction.content);
 
+                if (emoji === "🚀") {
+                    row.Reported = "✅";
+                    return;
+                }
+
                 row[user] = emoji;
                 if (emoji === "👍") row.thumbsUpCount += 1;
                 if (emoji === "👎") row.thumbsDownCount += 1;
@@ -125,6 +130,7 @@ async function main(configPath) {
     }
 
     const workbook = new ExcelJS.Workbook();
+    let index = 0;
 
     for (const { owner, repo, pullRequestNumber } of config) {
         console.log(`\nProcessing ${owner}/${repo} - Pull Request #${pullRequestNumber}`);
@@ -134,10 +140,12 @@ async function main(configPath) {
             pullRequestNumber,
         );
 
-        const worksheet = workbook.addWorksheet(`${repo}-PR#${pullRequestNumber}`);
+        const worksheet = workbook.addWorksheet(
+            `${index}-${repo}-PR#${pullRequestNumber}`,
+        );
 
         // Add headers
-        const headerRow = ["Comment", ...commenters];
+        const headerRow = ["Comment", "Reported", ...commenters];
         worksheet.columns = headerRow.map((key, i) => ({
             header: key,
             key: key,
@@ -183,6 +191,8 @@ async function main(configPath) {
                 };
             }
         });
+
+        index++;
     }
 
     // Write workbook to file with the name "Review.xlsx"
