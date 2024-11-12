@@ -1,4 +1,4 @@
-import { Octokit } from "@octokit/rest";
+import { graphql } from "@octokit/graphql";
 import fs from "fs/promises";
 import ExcelJS from "exceljs";
 import dotenv from "dotenv";
@@ -6,9 +6,11 @@ import puppeteer from "puppeteer";
 
 dotenv.config();
 
-// Initialize Octokit with authentication
-const octokit = new Octokit({
-    auth: process.env.GITHUB_TOKEN,
+// Initialize the GraphQL client with authentication
+const graphqlWithAuth = graphql.defaults({
+    headers: {
+        authorization: `token ${process.env.GITHUB_TOKEN}`,
+    },
 });
 
 // Load configuration from a specified path or default to "config.json" in the current directory
@@ -30,70 +32,111 @@ function truncateText(text, charLimit = 300) {
     return text.slice(0, charLimit).concat("...");
 }
 
-// Fetch PR review comments with reactions
+// Fetch PR review comments with reactions using GraphQL
 async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) {
     const rows = []; // Array to hold each comment's data for Excel or PDF
     const commenters = [];
     try {
-        // Fetch review comments on the specified pull request
-        const { data: comments } = await octokit.rest.pulls.listReviewComments({
+        // GraphQL query to fetch review threads, comments, and reactions
+        const query = `
+      query ($owner: String!, $repo: String!, $pullRequestNumber: Int!) {
+        repository(owner: $owner, name: $repo) {
+          pullRequest(number: $pullRequestNumber) {
+            reviewThreads(first: 100) {
+              nodes {
+                isResolved
+                comments(first: 1) {
+                  nodes {
+                    id
+                    body
+                    url
+                    author {
+                      login
+                    }
+                    reactions(first: 50) {
+                      nodes {
+                        content
+                        user {
+                          login
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+
+        const result = await graphqlWithAuth(query, {
             owner,
             repo,
-            pull_number: pullRequestNumber,
-            per_page: 100,
+            pullRequestNumber,
         });
 
-        for (const comment of comments) {
-            const {
-                id: commentId,
-                body: commentText,
-                html_url: commentUrl,
-                user: commenter,
-                in_reply_to_id: skip,
-            } = comment;
+        const reviewThreads = result.repository.pullRequest.reviewThreads.nodes;
 
-            if (skip) {
-                continue;
-            }
+        for (const thread of reviewThreads) {
+            const isResolved = thread.isResolved;
 
-            const truncatedText = truncateText(commentText);
+            for (const comment of thread.comments.nodes) {
+                const {
+                    id: commentId,
+                    body: commentText,
+                    url: commentUrl,
+                    author: commenter,
+                } = comment;
 
-            if (!commenters.includes(commenter.login)) {
-                commenters.push(commenter.login);
-            }
+                const truncatedText = truncateText(commentText);
 
-            // Row with the clickable comment text as a hyperlink
-            const row = {
-                Comment: { text: truncatedText, hyperlink: commentUrl },
-            };
-
-            // Fetch reactions for each comment
-            const { data: reactions } =
-                await octokit.rest.reactions.listForPullRequestReviewComment({
-                    owner,
-                    repo,
-                    comment_id: commentId,
-                });
-
-            // Process reactions and count reactions per user
-            row.thumbsUpCount = 0;
-            row.thumbsDownCount = 0;
-            row[commenter.login] = "Proposer";
-            reactions.forEach((reaction) => {
-                const user = reaction.user.login;
-                const emoji = getEmoji(reaction.content);
-
-                if (emoji === "🚀") {
-                    row.Reported = "✅";
-                    return;
+                if (!commenters.includes(commenter.login)) {
+                    commenters.push(commenter.login);
                 }
 
-                row[user] = emoji;
-                if (emoji === "👍") row.thumbsUpCount += 1;
-                if (emoji === "👎") row.thumbsDownCount += 1;
-            });
+                // Row with the clickable comment text as a hyperlink
+                const row = {
+                    Comment: { text: truncatedText, hyperlink: commentUrl },
+                };
 
-            rows.push(row);
+                if (isResolved) {
+                    row.Reported = "❌";
+                }
+
+                // Process reactions
+                const reactions = comment.reactions.nodes;
+
+                // Initialize reaction counts
+                row.thumbsUpCount = 0;
+                row.thumbsDownCount = 0;
+                row[commenter.login] = "Proposer";
+
+                reactions.forEach((reaction) => {
+                    const user = reaction.user.login;
+                    if (!commenters.includes(user)) {
+                        commenters.push(user);
+                    }
+                    const emoji = getEmoji(reaction.content);
+
+                    if (emoji === "🚀") {
+                        if (isResolved) {
+                            console.log(
+                                "Comment is resolved but there is the rocket emoji",
+                                truncatedText,
+                            );
+                        }
+                        row.Reported = "✅";
+                        return;
+                    }
+
+                    row[user] = emoji;
+                    if (emoji === "👍") row.thumbsUpCount += 1;
+                    if (emoji === "👎") row.thumbsDownCount += 1;
+                });
+
+                rows.push(row);
+            }
         }
     } catch (error) {
         console.error(
@@ -108,16 +151,16 @@ async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) 
 // Function to map reaction content to emoji
 function getEmoji(content) {
     const emojiMap = {
-        "+1": "👍",
-        "-1": "👎",
-        laugh: "😄",
-        hooray: "🎉",
-        confused: "😕",
-        heart: "❤️",
-        rocket: "🚀",
-        eyes: "👀",
+        THUMBS_UP: "👍",
+        THUMBS_DOWN: "👎",
+        LAUGH: "😄",
+        HOORAY: "🎉",
+        CONFUSED: "😕",
+        HEART: "❤️",
+        ROCKET: "🚀",
+        EYES: "👀",
     };
-    return emojiMap[content] || content;
+    return emojiMap[content.toUpperCase()] || content;
 }
 
 // Main function to process each PR from config
@@ -337,7 +380,7 @@ async function main(configPath, format) {
 // Parse command-line arguments
 const args = process.argv.slice(2);
 let configPath = "./config.json";
-let format = "excel"; // Default format
+let format = "pdf"; // Default format
 
 args.forEach((arg) => {
     if (arg.startsWith("--format=")) {
