@@ -1,12 +1,15 @@
-[
-    {
-        "owner": "OWNER_NAME_1",
-        "repo": "REPO_NAME_1",
-        "pullRequestNumber": 1
-    },
-    {
-        "owner": "OWNER_NAME_2",
-        "repo": "REPO_NAME_2",
-        "pullRequestNumber": 2
-    }
-]
+{
+    "name": "TEST",
+    "repositories": [
+        {
+            "owner": "OWNER_NAME_1",
+            "repo": "REPO_NAME_1",
+            "pullRequestNumber": 1
+        },
+        {
+            "owner": "OWNER_NAME_2",
+            "repo": "REPO_NAME_2",
+            "pullRequestNumber": 2
+        }
+    ]
+}

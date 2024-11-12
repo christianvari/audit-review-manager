@@ -163,215 +163,221 @@ function getEmoji(content) {
     return emojiMap[content.toUpperCase()] || content;
 }
 
+async function renderExcel(repos, name) {
+    const workbook = new ExcelJS.Workbook();
+    let index = 0;
+
+    for (const { owner, repo, pullRequestNumber } of repos) {
+        console.log(`\nProcessing ${owner}/${repo} - Pull Request #${pullRequestNumber}`);
+        const { rows, commenters } = await getPRReviewCommentsWithReactions(
+            owner,
+            repo,
+            pullRequestNumber,
+        );
+
+        const worksheet = workbook.addWorksheet(
+            `${index}-${repo}-PR#${pullRequestNumber}`,
+        );
+
+        // Add headers
+        const headerRow = ["Comment", "Reported", ...commenters];
+        worksheet.columns = headerRow.map((key, i) => ({
+            header: key,
+            key: key,
+            width: i === 0 ? 100 : 25, // Set width for columns
+        }));
+
+        // Style header row
+        worksheet.getRow(1).font = { bold: true, size: 16 };
+        worksheet.getRow(1).alignment = {
+            vertical: "middle",
+            horizontal: "center",
+            wrapText: true,
+        };
+
+        // Add rows and hyperlinks
+        rows.forEach((dataRow) => {
+            const row = worksheet.addRow(dataRow);
+            row.font = { size: 16 };
+
+            // Format comment column as clickable hyperlink
+            const commentCell = row.getCell("Comment");
+            commentCell.value = {
+                text: dataRow.Comment.text,
+                hyperlink: dataRow.Comment.hyperlink,
+            };
+            commentCell.font = {
+                color: { argb: "FF0000FF" },
+                underline: true,
+                size: 16,
+            }; // Blue and underlined
+            row.alignment = { vertical: "middle", wrapText: true };
+
+            if (dataRow.thumbsUpCount > (2 / 3) * commenters.length - 1) {
+                row.fill = {
+                    type: "pattern",
+                    pattern: "solid",
+                    fgColor: { argb: "CCFFCC" },
+                };
+            }
+
+            // Highlight row in light red if > 2/3 of commenters gave a 👎
+            if (dataRow.thumbsDownCount > (2 / 3) * commenters.length - 1) {
+                row.fill = {
+                    type: "pattern",
+                    pattern: "solid",
+                    fgColor: { argb: "FFCCCC" },
+                };
+            }
+        });
+
+        index++;
+    }
+
+    // Write workbook to file with the name "Review.xlsx"
+    await workbook.xlsx.writeFile(`${name}.xlsx`);
+    console.log("Excel file created: Review.xlsx");
+}
+
+async function renderPDF(repos, name) {
+    let htmlContent = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>Review Report</title>
+      <style>
+        body {
+          font-family: Arial, sans-serif;
+          margin: 20px;
+        }
+        h1 {
+          text-align: center;
+        }
+        table {
+          width: 100%;
+          border-collapse: collapse;
+          margin-bottom: 40px;
+        }
+        th, td {
+          border: 1px solid #dddddd;
+          text-align: left;
+          padding: 8px;
+          vertical-align: top;
+        }
+        th {
+          background-color: #f2f2f2;
+        }
+        .green-row {
+          background-color: #ccffcc;
+        }
+        .red-row {
+          background-color: #ffcccc;
+        }
+        a {
+          color: #0066cc;
+          text-decoration: none;
+        }
+        a:hover {
+          text-decoration: underline;
+        }
+      </style>
+    </head>
+    <body>
+  `;
+
+    for (const { owner, repo, pullRequestNumber } of repos) {
+        console.log(`\nProcessing ${owner}/${repo} - Pull Request #${pullRequestNumber}`);
+        const { rows, commenters } = await getPRReviewCommentsWithReactions(
+            owner,
+            repo,
+            pullRequestNumber,
+        );
+
+        // Add a title for each PR
+        htmlContent += `<h1>${owner}/${repo} - Pull Request #${pullRequestNumber}</h1>`;
+
+        // Prepare table headers
+        const headers = ["Comment", "Reported", ...commenters];
+        htmlContent += `<table><tr>`;
+        headers.forEach((header) => {
+            htmlContent += `<th>${header}</th>`;
+        });
+        htmlContent += `</tr>`;
+
+        // Add table rows
+        rows.forEach((dataRow) => {
+            const thumbsUpCount = dataRow.thumbsUpCount;
+            const thumbsDownCount = dataRow.thumbsDownCount;
+            const totalCommenters = commenters.length;
+
+            let rowClass = "";
+            if (thumbsUpCount > (2 / 3) * totalCommenters - 1) {
+                rowClass = "green-row";
+            } else if (thumbsDownCount > (2 / 3) * totalCommenters - 1) {
+                rowClass = "red-row";
+            }
+
+            htmlContent += `<tr class="${rowClass}">`;
+
+            // Comment column with hyperlink
+            htmlContent += `<td><a href="${dataRow.Comment.hyperlink}">${dataRow.Comment.text}</a></td>`;
+
+            // Reported column
+            htmlContent += `<td>${dataRow.Reported || ""}</td>`;
+
+            // Reactions from commenters
+            commenters.forEach((commenter) => {
+                htmlContent += `<td>${dataRow[commenter] || ""}</td>`;
+            });
+
+            htmlContent += `</tr>`;
+        });
+
+        htmlContent += `</table>`;
+    }
+
+    htmlContent += `
+    </body>
+    </html>
+  `;
+
+    // Launch Puppeteer and generate PDF
+    console.log("Generating PDF...");
+    const browser = await puppeteer.launch();
+    const page = await browser.newPage();
+
+    // Set HTML content
+    await page.setContent(htmlContent, { waitUntil: "networkidle0" });
+
+    // Generate PDF with landscape orientation
+    await page.pdf({
+        path: `${name}.pdf`,
+        format: "A4",
+        landscape: true, // Set landscape orientation
+        printBackground: true,
+        margin: { top: "20mm", bottom: "20mm", left: "10mm", right: "10mm" },
+    });
+
+    await browser.close();
+    console.log(`PDF file created: ${name}.pdf`);
+}
+
 // Main function to process each PR from config
 async function main(configPath, format) {
     const config = await loadConfig(configPath);
 
-    if (config.length === 0) {
+    const repos = config.repositories;
+
+    if (repos.length === 0) {
         console.log("No repositories and pull requests found in config.");
         return;
     }
 
     if (format === "excel") {
-        const workbook = new ExcelJS.Workbook();
-        let index = 0;
-
-        for (const { owner, repo, pullRequestNumber } of config) {
-            console.log(
-                `\nProcessing ${owner}/${repo} - Pull Request #${pullRequestNumber}`,
-            );
-            const { rows, commenters } = await getPRReviewCommentsWithReactions(
-                owner,
-                repo,
-                pullRequestNumber,
-            );
-
-            const worksheet = workbook.addWorksheet(
-                `${index}-${repo}-PR#${pullRequestNumber}`,
-            );
-
-            // Add headers
-            const headerRow = ["Comment", "Reported", ...commenters];
-            worksheet.columns = headerRow.map((key, i) => ({
-                header: key,
-                key: key,
-                width: i === 0 ? 100 : 25, // Set width for columns
-            }));
-
-            // Style header row
-            worksheet.getRow(1).font = { bold: true, size: 16 };
-            worksheet.getRow(1).alignment = {
-                vertical: "middle",
-                horizontal: "center",
-                wrapText: true,
-            };
-
-            // Add rows and hyperlinks
-            rows.forEach((dataRow) => {
-                const row = worksheet.addRow(dataRow);
-                row.font = { size: 16 };
-
-                // Format comment column as clickable hyperlink
-                const commentCell = row.getCell("Comment");
-                commentCell.value = {
-                    text: dataRow.Comment.text,
-                    hyperlink: dataRow.Comment.hyperlink,
-                };
-                commentCell.font = {
-                    color: { argb: "FF0000FF" },
-                    underline: true,
-                    size: 16,
-                }; // Blue and underlined
-                row.alignment = { vertical: "middle", wrapText: true };
-
-                if (dataRow.thumbsUpCount > (2 / 3) * commenters.length - 1) {
-                    row.fill = {
-                        type: "pattern",
-                        pattern: "solid",
-                        fgColor: { argb: "CCFFCC" },
-                    };
-                }
-
-                // Highlight row in light red if > 2/3 of commenters gave a 👎
-                if (dataRow.thumbsDownCount > (2 / 3) * commenters.length - 1) {
-                    row.fill = {
-                        type: "pattern",
-                        pattern: "solid",
-                        fgColor: { argb: "FFCCCC" },
-                    };
-                }
-            });
-
-            index++;
-        }
-
-        // Write workbook to file with the name "Review.xlsx"
-        await workbook.xlsx.writeFile("Review.xlsx");
-        console.log("Excel file created: Review.xlsx");
+        await renderExcel(repos, config.name);
     } else if (format === "pdf") {
-        let htmlContent = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="utf-8">
-        <title>Review Report</title>
-        <style>
-          body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
-          }
-          h1 {
-            text-align: center;
-          }
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 40px;
-          }
-          th, td {
-            border: 1px solid #dddddd;
-            text-align: left;
-            padding: 8px;
-            vertical-align: top;
-          }
-          th {
-            background-color: #f2f2f2;
-          }
-          .green-row {
-            background-color: #ccffcc;
-          }
-          .red-row {
-            background-color: #ffcccc;
-          }
-          a {
-            color: #0066cc;
-            text-decoration: none;
-          }
-          a:hover {
-            text-decoration: underline;
-          }
-        </style>
-      </head>
-      <body>
-    `;
-
-        for (const { owner, repo, pullRequestNumber } of config) {
-            console.log(
-                `\nProcessing ${owner}/${repo} - Pull Request #${pullRequestNumber}`,
-            );
-            const { rows, commenters } = await getPRReviewCommentsWithReactions(
-                owner,
-                repo,
-                pullRequestNumber,
-            );
-
-            // Add a title for each PR
-            htmlContent += `<h1>${owner}/${repo} - Pull Request #${pullRequestNumber}</h1>`;
-
-            // Prepare table headers
-            const headers = ["Comment", "Reported", ...commenters];
-            htmlContent += `<table><tr>`;
-            headers.forEach((header) => {
-                htmlContent += `<th>${header}</th>`;
-            });
-            htmlContent += `</tr>`;
-
-            // Add table rows
-            rows.forEach((dataRow) => {
-                const thumbsUpCount = dataRow.thumbsUpCount;
-                const thumbsDownCount = dataRow.thumbsDownCount;
-                const totalCommenters = commenters.length;
-
-                let rowClass = "";
-                if (thumbsUpCount > (2 / 3) * totalCommenters - 1) {
-                    rowClass = "green-row";
-                } else if (thumbsDownCount > (2 / 3) * totalCommenters - 1) {
-                    rowClass = "red-row";
-                }
-
-                htmlContent += `<tr class="${rowClass}">`;
-
-                // Comment column with hyperlink
-                htmlContent += `<td><a href="${dataRow.Comment.hyperlink}">${dataRow.Comment.text}</a></td>`;
-
-                // Reported column
-                htmlContent += `<td>${dataRow.Reported || ""}</td>`;
-
-                // Reactions from commenters
-                commenters.forEach((commenter) => {
-                    htmlContent += `<td>${dataRow[commenter] || ""}</td>`;
-                });
-
-                htmlContent += `</tr>`;
-            });
-
-            htmlContent += `</table>`;
-        }
-
-        htmlContent += `
-      </body>
-      </html>
-    `;
-
-        // Launch Puppeteer and generate PDF
-        console.log("Generating PDF...");
-        const browser = await puppeteer.launch();
-        const page = await browser.newPage();
-
-        // Set HTML content
-        await page.setContent(htmlContent, { waitUntil: "networkidle0" });
-
-        // Generate PDF with landscape orientation
-        await page.pdf({
-            path: "Review.pdf",
-            format: "A4",
-            landscape: true, // Set landscape orientation
-            printBackground: true,
-            margin: { top: "20mm", bottom: "20mm", left: "10mm", right: "10mm" },
-        });
-
-        await browser.close();
-        console.log("PDF file created: Review.pdf");
+        await renderPDF(repos, config.name);
     } else {
         console.error(`Invalid format specified: ${format}`);
     }
