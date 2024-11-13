@@ -120,13 +120,15 @@ async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) 
                     const emoji = getEmoji(reaction.content);
 
                     if (emoji === "🚀") {
+                        row.Reported = "✅";
                         if (isResolved) {
-                            console.log(
+                            console.warn(
                                 "Comment is resolved but there is the rocket emoji",
                                 truncatedText,
                             );
+                            row.Reported = "⚠️";
                         }
-                        row.Reported = "✅";
+
                         return;
                     }
 
@@ -168,7 +170,9 @@ async function renderExcel(repos, name) {
     let index = 0;
 
     for (const { owner, repo, pullRequestNumber } of repos) {
-        console.log(`\nProcessing ${owner}/${repo} - Pull Request #${pullRequestNumber}`);
+        console.info(
+            `\nProcessing ${owner}/${repo} - Pull Request #${pullRequestNumber}`,
+        );
         const { rows, commenters } = await getPRReviewCommentsWithReactions(
             owner,
             repo,
@@ -236,7 +240,7 @@ async function renderExcel(repos, name) {
 
     // Write workbook to file with the name "Review.xlsx"
     await workbook.xlsx.writeFile(`${name}.xlsx`);
-    console.log("Excel file created: Review.xlsx");
+    console.info(`Excel file created: ${name}.xlsx`);
 }
 
 async function renderPDF(repos, name) {
@@ -287,7 +291,9 @@ async function renderPDF(repos, name) {
   `;
 
     for (const { owner, repo, pullRequestNumber } of repos) {
-        console.log(`\nProcessing ${owner}/${repo} - Pull Request #${pullRequestNumber}`);
+        console.info(
+            `\nProcessing ${owner}/${repo} - Pull Request #${pullRequestNumber}`,
+        );
         const { rows, commenters } = await getPRReviewCommentsWithReactions(
             owner,
             repo,
@@ -343,7 +349,7 @@ async function renderPDF(repos, name) {
   `;
 
     // Launch Puppeteer and generate PDF
-    console.log("Generating PDF...");
+    console.info("Generating PDF...");
     const browser = await puppeteer.launch();
     const page = await browser.newPage();
 
@@ -360,7 +366,7 @@ async function renderPDF(repos, name) {
     });
 
     await browser.close();
-    console.log(`PDF file created: ${name}.pdf`);
+    console.info(`PDF file created: ${name}.pdf`);
 }
 
 // Main function to process each PR from config
@@ -370,7 +376,7 @@ async function main(configPath, format) {
     const repos = config.repositories;
 
     if (repos.length === 0) {
-        console.log("No repositories and pull requests found in config.");
+        console.error("No repositories and pull requests found in config.");
         return;
     }
 
