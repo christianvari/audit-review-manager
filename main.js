@@ -24,6 +24,16 @@ async function loadConfig(configPath = "./config.json") {
     }
 }
 
+function formatDateTime(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    const hours = String(date.getHours()).padStart(2, "0");
+    const minutes = String(date.getMinutes()).padStart(2, "0");
+    const seconds = String(date.getSeconds()).padStart(2, "0");
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+}
+
 // Helper function to truncate comment text to 50 words
 function truncateText(text, charLimit = 300) {
     if (text.length <= charLimit) {
@@ -167,6 +177,7 @@ function getEmoji(content) {
 
 async function renderExcel(repos, name) {
     const workbook = new ExcelJS.Workbook();
+    const generatedOn = formatDateTime(new Date()); // Get current date and time
     let index = 0;
 
     for (const { owner, repo, pullRequestNumber } of repos) {
@@ -182,6 +193,9 @@ async function renderExcel(repos, name) {
         const worksheet = workbook.addWorksheet(
             `${index}-${repo}-PR#${pullRequestNumber}`,
         );
+
+        // Add date and time to the worksheet header
+        worksheet.headerFooter.oddHeader = `&CGenerated on ${generatedOn}`;
 
         // Add headers
         const headerRow = ["Comment", "Reported", ...commenters];
@@ -244,6 +258,7 @@ async function renderExcel(repos, name) {
 }
 
 async function renderPDF(repos, name) {
+    const generatedOn = formatDateTime(new Date()); // Get current date and time
     let htmlContent = `
     <!DOCTYPE html>
     <html>
@@ -257,6 +272,11 @@ async function renderPDF(repos, name) {
         }
         h1 {
           text-align: center;
+        }
+        p.generated-on {
+          text-align: right;
+          font-style: italic;
+          color: #555;
         }
         table {
           width: 100%;
@@ -288,6 +308,8 @@ async function renderPDF(repos, name) {
       </style>
     </head>
     <body>
+        <p class="generated-on">Generated on ${generatedOn}</p>
+
   `;
 
     for (const { owner, repo, pullRequestNumber } of repos) {
