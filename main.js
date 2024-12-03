@@ -129,22 +129,30 @@ async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) 
                     }
                     const emoji = getEmoji(reaction.content);
 
-                    if (emoji === "🚀") {
-                        row.Reported = "✅";
-                        if (isResolved) {
-                            console.warn(
-                                "Comment is resolved but there is the rocket emoji",
-                                truncatedText,
-                            );
-                            row.Reported = "⚠️";
-                        }
-
-                        return;
+                    switch (emoji) {
+                        case "🚀":
+                            row.Reported = "✅";
+                            if (isResolved) {
+                                console.warn(
+                                    "Comment is resolved but there is the rocket emoji",
+                                    truncatedText,
+                                );
+                                row.Reported = "⚠️";
+                            }
+                            break;
+                        case "👍":
+                            row[user] = emoji;
+                            row.thumbsUpCount += 1;
+                            break;
+                        case "👎":
+                            row[user] = emoji;
+                            row.thumbsDownCount += 1;
+                            break;
+                        case "👀":
+                            break;
+                        default:
+                            console.warn("Incorrect emoji", emoji, user, commentUrl);
                     }
-
-                    row[user] = emoji;
-                    if (emoji === "👍") row.thumbsUpCount += 1;
-                    if (emoji === "👎") row.thumbsDownCount += 1;
                 });
 
                 rows.push(row);
