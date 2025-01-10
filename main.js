@@ -239,7 +239,7 @@ async function renderExcel(repos, name) {
             }; // Blue and underlined
             row.alignment = { vertical: "middle", wrapText: true };
 
-            if (dataRow.thumbsUpCount > (2 / 3) * commenters.length - 1) {
+            if (dataRow.thumbsUpCount + 1 >= (2 / 3) * commenters.length) {
                 row.fill = {
                     type: "pattern",
                     pattern: "solid",
@@ -248,7 +248,7 @@ async function renderExcel(repos, name) {
             }
 
             // Highlight row in light red if > 2/3 of commenters gave a 👎
-            if (dataRow.thumbsDownCount > (2 / 3) * commenters.length - 1) {
+            if (dataRow.thumbsDownCount >= (2 / 3) * (commenters.length - 1)) {
                 row.fill = {
                     type: "pattern",
                     pattern: "solid",
@@ -348,9 +348,9 @@ async function renderPDF(repos, name) {
             const totalCommenters = commenters.length;
 
             let rowClass = "";
-            if (thumbsUpCount > (2 / 3) * totalCommenters - 1) {
+            if (thumbsUpCount + 1 >= (2 / 3) * totalCommenters) {
                 rowClass = "green-row";
-            } else if (thumbsDownCount > (2 / 3) * totalCommenters - 1) {
+            } else if (thumbsDownCount >= (2 / 3) * (totalCommenters - 1)) {
                 rowClass = "red-row";
             }
 
