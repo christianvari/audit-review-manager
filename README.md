@@ -107,7 +107,7 @@ Create a `config.json` file in the root directory of the project to specify the 
 Run the script using Node.js, optionally specifying command-line arguments for format and configuration path.
 
 ```bash
-node index.js [--format=pdf|excel] [--config-path=path/to/config.json]
+node main.js [--format=pdf|excel] [--config-path=path/to/config.json]
 ```
 
 ### Command-Line Arguments
@@ -129,13 +129,13 @@ node index.js [--format=pdf|excel] [--config-path=path/to/config.json]
 - **Generate a PDF Report Using Default Config**
 
   ```bash
-  node index.js
+  node main.js
   ```
 
 - **Generate an Excel Report with Custom Config Path**
 
   ```bash
-  node index.js --format=excel --config-path=./myconfig.json
+  node main.js --format=excel --config-path=./myconfig.json
   ```
 
 ## Output
