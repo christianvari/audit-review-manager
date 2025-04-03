@@ -46,6 +46,8 @@ function truncateText(text, charLimit = 300) {
 async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) {
     const rows = []; // Array to hold each comment's data for Excel or PDF
     const commenters = [];
+    const comments = []; // Store all comments for later reaction processing
+
     try {
         // GraphQL query to fetch review threads, comments, and reactions
         const query = `
@@ -88,6 +90,7 @@ async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) 
 
         const reviewThreads = result.repository.pullRequest.reviewThreads.nodes;
 
+        // First pass: collect all commenters and build comment data
         for (const thread of reviewThreads) {
             const isResolved = thread.isResolved;
 
@@ -108,6 +111,7 @@ async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) 
                 // Row with the clickable comment text as a hyperlink
                 const row = {
                     Comment: { text: truncatedText, hyperlink: commentUrl },
+                    proposer: commenter.login,
                 };
 
                 if (isResolved) {
@@ -121,6 +125,7 @@ async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) 
                 row.thumbsUpCount = 0;
                 row.thumbsDownCount = 0;
                 row[commenter.login] = "Proposer";
+                row.reactions = {}; // Track who reacted
 
                 reactions.forEach((reaction) => {
                     const user = reaction.user.login;
@@ -143,10 +148,12 @@ async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) 
                         case "👍":
                             row[user] = emoji;
                             row.thumbsUpCount += 1;
+                            row.reactions[user] = true;
                             break;
                         case "👎":
                             row[user] = emoji;
                             row.thumbsDownCount += 1;
+                            row.reactions[user] = true;
                             break;
                         case "👀":
                             break;
@@ -156,6 +163,7 @@ async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) 
                 });
 
                 rows.push(row);
+                comments.push(row);
             }
         }
     } catch (error) {
@@ -165,7 +173,39 @@ async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) 
         );
     }
 
-    return { rows, commenters };
+    // Initialize reaction tracker with all commenters
+    const reactionsTracker = {};
+    commenters.forEach((username) => {
+        reactionsTracker[username] = { reacted: 0, total: 0 };
+    });
+
+    // Second pass: calculate reactions and totals
+    comments.forEach((comment) => {
+        const proposer = comment.proposer;
+
+        // For each commenter, increment their total count (except for the comment proposer)
+        commenters.forEach((username) => {
+            if (username !== proposer) {
+                reactionsTracker[username].total += 1;
+
+                // Check if this user reacted to this comment
+                if (comment.reactions[username]) {
+                    reactionsTracker[username].reacted += 1;
+                }
+            }
+        });
+    });
+
+    // Calculate percentages and format totals
+    const reactionStats = {};
+    commenters.forEach((username) => {
+        const stats = reactionsTracker[username];
+        const percentage =
+            stats.total === 0 ? 100 : Math.round((stats.reacted / stats.total) * 100);
+        reactionStats[username] = `${stats.reacted}/${stats.total} (${percentage}%)`;
+    });
+
+    return { rows, commenters, reactionStats };
 }
 
 // Function to map reaction content to emoji
@@ -192,11 +232,8 @@ async function renderExcel(repos, name) {
         console.info(
             `\nProcessing ${owner}/${repo} - Pull Request #${pullRequestNumber}`,
         );
-        const { rows, commenters } = await getPRReviewCommentsWithReactions(
-            owner,
-            repo,
-            pullRequestNumber,
-        );
+        const { rows, commenters, reactionStats } =
+            await getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber);
 
         const worksheet = workbook.addWorksheet(
             `${index}-${repo}-PR#${pullRequestNumber}`,
@@ -205,29 +242,57 @@ async function renderExcel(repos, name) {
         // Add date and time to the worksheet header
         worksheet.headerFooter.oddHeader = `&CGenerated on ${generatedOn}`;
 
-        // Add headers
-        const headerRow = ["Comment", "Reported", ...commenters];
-        worksheet.columns = headerRow.map((key, i) => ({
-            header: key,
-            key: key,
-            width: i === 0 ? 100 : 25, // Set width for columns
-        }));
+        // Add summary section for reaction stats
+        worksheet.addRow(["Reaction Completion Stats"]);
+        worksheet.addRow(["Reviewer", "Reactions Completed"]);
 
-        // Style header row
+        // Style the header
         worksheet.getRow(1).font = { bold: true, size: 16 };
-        worksheet.getRow(1).alignment = {
+        worksheet.getRow(2).font = { bold: true, size: 14 };
+
+        // Add stats for each commenter
+        let rowIndex = 3;
+        commenters.forEach((commenter) => {
+            worksheet.addRow([commenter, reactionStats[commenter]]);
+            worksheet.getRow(rowIndex).font = { size: 14 };
+            rowIndex++;
+        });
+
+        // Add a blank row as separator
+        worksheet.addRow([]);
+        rowIndex++;
+
+        // Add headers for comments section
+        const headerRow = ["Comment", "Reported", ...commenters];
+        const headerRowIndex = rowIndex;
+        worksheet.addRow(headerRow);
+
+        // Style comment section header
+        worksheet.getRow(headerRowIndex).font = { bold: true, size: 16 };
+        worksheet.getRow(headerRowIndex).alignment = {
             vertical: "middle",
             horizontal: "center",
             wrapText: true,
         };
 
+        // Set column widths
+        worksheet.getColumn(1).width = 100;
+        headerRow.slice(1).forEach((_, index) => {
+            worksheet.getColumn(index + 2).width = 25;
+        });
+
         // Add rows and hyperlinks
         rows.forEach((dataRow) => {
-            const row = worksheet.addRow(dataRow);
+            const row = worksheet.addRow([
+                dataRow.Comment.text,
+                dataRow.Reported || "",
+                ...commenters.map((commenter) => dataRow[commenter] || ""),
+            ]);
+
             row.font = { size: 16 };
 
             // Format comment column as clickable hyperlink
-            const commentCell = row.getCell("Comment");
+            const commentCell = row.getCell(1);
             commentCell.value = {
                 text: dataRow.Comment.text,
                 hyperlink: dataRow.Comment.hyperlink,
@@ -278,7 +343,7 @@ async function renderPDF(repos, name) {
           font-family: Arial, sans-serif;
           margin: 20px;
         }
-        h1 {
+        h1, h2 {
           text-align: center;
         }
         p.generated-on {
@@ -313,6 +378,10 @@ async function renderPDF(repos, name) {
         a:hover {
           text-decoration: underline;
         }
+        .summary-table {
+          width: 50%;
+          margin: 0 auto 30px auto;
+        }
       </style>
     </head>
     <body>
@@ -324,18 +393,36 @@ async function renderPDF(repos, name) {
         console.info(
             `\nProcessing ${owner}/${repo} - Pull Request #${pullRequestNumber}`,
         );
-        const { rows, commenters } = await getPRReviewCommentsWithReactions(
-            owner,
-            repo,
-            pullRequestNumber,
-        );
+        const { rows, commenters, reactionStats } =
+            await getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber);
 
         // Add a title for each PR
         htmlContent += `<h1>${owner}/${repo} - Pull Request #${pullRequestNumber}</h1>`;
 
-        // Prepare table headers
+        // Add reaction stats summary table
+        htmlContent += `
+          <h2>Reaction Completion Stats</h2>
+          <table class="summary-table">
+            <tr>
+              <th>Reviewer</th>
+              <th>Reactions Completed</th>
+            </tr>
+        `;
+
+        commenters.forEach((commenter) => {
+            htmlContent += `
+              <tr>
+                <td>${commenter}</td>
+                <td>${reactionStats[commenter]}</td>
+              </tr>
+            `;
+        });
+
+        htmlContent += `</table>`;
+
+        // Prepare table headers for comments
         const headers = ["Comment", "Reported", ...commenters];
-        htmlContent += `<table><tr>`;
+        htmlContent += `<h2>Comments</h2><table><tr>`;
         headers.forEach((header) => {
             htmlContent += `<th>${header}</th>`;
         });
