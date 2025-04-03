@@ -6,6 +6,21 @@ import puppeteer from "puppeteer";
 
 dotenv.config();
 
+// Color constants for consistent styling
+const COLORS = {
+    GREEN: { excel: "CCFFCC", html: "#ccffcc" }, // High percentage/positive
+    YELLOW: { excel: "FFFFCC", html: "#ffffcc" }, // Medium-high percentage
+    ORANGE: { excel: "FFEB9C", html: "#ffeb9c" }, // Medium-low percentage
+    RED: { excel: "FFCCCC", html: "#ffcccc" }, // Low percentage/negative
+};
+
+// Thresholds for color transitions
+const THRESHOLD = {
+    HIGH: 90, // Green
+    MEDIUM: 70, // Yellow
+    LOW: 50, // Orange, below this is red
+};
+
 // Initialize the GraphQL client with authentication
 const graphqlWithAuth = graphql.defaults({
     headers: {
@@ -202,10 +217,26 @@ async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) 
         const stats = reactionsTracker[username];
         const percentage =
             stats.total === 0 ? 100 : Math.round((stats.reacted / stats.total) * 100);
-        reactionStats[username] = `${stats.reacted}/${stats.total} (${percentage}%)`;
+        reactionStats[username] = {
+            text: `${stats.reacted}/${stats.total} (${percentage}%)`,
+            percentage: percentage,
+        };
     });
 
     return { rows, commenters, reactionStats };
+}
+
+// Function to get color based on percentage
+function getColorForPercentage(percentage) {
+    if (percentage >= THRESHOLD.HIGH) {
+        return COLORS.GREEN;
+    } else if (percentage >= THRESHOLD.MEDIUM) {
+        return COLORS.YELLOW;
+    } else if (percentage >= THRESHOLD.LOW) {
+        return COLORS.ORANGE;
+    } else {
+        return COLORS.RED;
+    }
 }
 
 // Function to map reaction content to emoji
@@ -253,8 +284,18 @@ async function renderExcel(repos, name) {
         // Add stats for each commenter
         let rowIndex = 3;
         commenters.forEach((commenter) => {
-            worksheet.addRow([commenter, reactionStats[commenter]]);
+            const statRow = worksheet.addRow([commenter, reactionStats[commenter].text]);
             worksheet.getRow(rowIndex).font = { size: 14 };
+
+            // Color the cell based on the percentage
+            const percentage = reactionStats[commenter].percentage;
+            const color = getColorForPercentage(percentage);
+            statRow.getCell(2).fill = {
+                type: "pattern",
+                pattern: "solid",
+                fgColor: { argb: color.excel },
+            };
+
             rowIndex++;
         });
 
@@ -308,7 +349,7 @@ async function renderExcel(repos, name) {
                 row.fill = {
                     type: "pattern",
                     pattern: "solid",
-                    fgColor: { argb: "CCFFCC" },
+                    fgColor: { argb: COLORS.GREEN.excel },
                 };
             }
 
@@ -317,7 +358,7 @@ async function renderExcel(repos, name) {
                 row.fill = {
                     type: "pattern",
                     pattern: "solid",
-                    fgColor: { argb: "FFCCCC" },
+                    fgColor: { argb: COLORS.RED.excel },
                 };
             }
         });
@@ -366,10 +407,10 @@ async function renderPDF(repos, name) {
           background-color: #f2f2f2;
         }
         .green-row {
-          background-color: #ccffcc;
+          background-color: ${COLORS.GREEN.html};
         }
         .red-row {
-          background-color: #ffcccc;
+          background-color: ${COLORS.RED.html};
         }
         a {
           color: #0066cc;
@@ -410,10 +451,12 @@ async function renderPDF(repos, name) {
         `;
 
         commenters.forEach((commenter) => {
+            const percentage = reactionStats[commenter].percentage;
+            const color = getColorForPercentage(percentage);
             htmlContent += `
               <tr>
                 <td>${commenter}</td>
-                <td>${reactionStats[commenter]}</td>
+                <td style="background-color: ${color.html}">${reactionStats[commenter].text}</td>
               </tr>
             `;
         });
