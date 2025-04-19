@@ -62,6 +62,12 @@ async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) 
     const rows = []; // Array to hold each comment's data for Excel or PDF
     const commenters = [];
     const comments = []; // Store all comments for later reaction processing
+    // Counter for issues statistics
+    const stats = {
+        reported: 0, // Resolved with rocket (✅)
+        nonReported: 0, // Resolved without rocket (❌)
+        pending: 0, // Not resolved (no status)
+    };
 
     try {
         // GraphQL query to fetch review threads, comments, and reactions
@@ -129,9 +135,8 @@ async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) 
                     proposer: commenter.login,
                 };
 
-                if (isResolved) {
-                    row.Reported = "❌";
-                }
+                // Only set Reported status for resolved comments
+                // Not resolved comments don't get a Reported status
 
                 // Process reactions
                 const reactions = comment.reactions.nodes;
@@ -142,6 +147,8 @@ async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) 
                 row[commenter.login] = "Proposer";
                 row.reactions = {}; // Track who reacted
 
+                let hasRocket = false;
+
                 reactions.forEach((reaction) => {
                     const user = reaction.user.login;
                     if (!commenters.includes(user)) {
@@ -151,14 +158,7 @@ async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) 
 
                     switch (emoji) {
                         case "🚀":
-                            row.Reported = "✅";
-                            if (isResolved) {
-                                console.warn(
-                                    "Comment is resolved but there is the rocket emoji",
-                                    truncatedText,
-                                );
-                                row.Reported = "⚠️";
-                            }
+                            hasRocket = true;
                             break;
                         case "👍":
                             row[user] = emoji;
@@ -176,6 +176,20 @@ async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) 
                             console.warn("Incorrect emoji", emoji, user, commentUrl);
                     }
                 });
+
+                // Set Reported status based on isResolved and hasRocket
+                if (isResolved) {
+                    row.Reported = hasRocket ? "✅" : "❌";
+                    // Update stats
+                    if (hasRocket) {
+                        stats.reported++;
+                    } else {
+                        stats.nonReported++;
+                    }
+                } else {
+                    // Not resolved -> pending
+                    stats.pending++;
+                }
 
                 rows.push(row);
                 comments.push(row);
@@ -223,7 +237,7 @@ async function getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber) 
         };
     });
 
-    return { rows, commenters, reactionStats };
+    return { rows, commenters, reactionStats, stats };
 }
 
 // Function to get color based on percentage
@@ -263,7 +277,7 @@ async function renderExcel(repos, name) {
         console.info(
             `\nProcessing ${owner}/${repo} - Pull Request #${pullRequestNumber}`,
         );
-        const { rows, commenters, reactionStats } =
+        const { rows, commenters, reactionStats, stats } =
             await getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber);
 
         const worksheet = workbook.addWorksheet(
@@ -273,16 +287,56 @@ async function renderExcel(repos, name) {
         // Add date and time to the worksheet header
         worksheet.headerFooter.oddHeader = `&CGenerated on ${generatedOn}`;
 
+        // Add issues summary table
+        worksheet.addRow(["Issues Summary"]);
+        worksheet.getRow(1).font = { bold: true, size: 18 };
+
+        worksheet.addRow(["Category", "Count"]);
+        worksheet.getRow(2).font = { bold: true, size: 16 };
+
+        // Add the stats rows
+        worksheet.addRow(["Reported (✅)", stats.reported]);
+        worksheet.addRow(["Non-Reported (❌)", stats.nonReported]);
+        worksheet.addRow(["Pending", stats.pending]);
+
+        // Style the stats cells
+        worksheet.getRow(3).font = { size: 14 };
+        worksheet.getRow(4).font = { size: 14 };
+        worksheet.getRow(5).font = { size: 14 };
+        worksheet.getRow(6).font = { size: 14, bold: true };
+
+        // Color cells based on category
+        worksheet.getRow(3).getCell(2).fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: COLORS.GREEN.excel },
+        };
+
+        worksheet.getRow(4).getCell(2).fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: COLORS.RED.excel },
+        };
+
+        worksheet.getRow(5).getCell(2).fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: COLORS.YELLOW.excel },
+        };
+
+        // Add a blank row as separator
+        worksheet.addRow([]);
+
         // Add summary section for reaction stats
         worksheet.addRow(["Reaction Completion Stats"]);
         worksheet.addRow(["Reviewer", "Reactions Completed"]);
 
         // Style the header
-        worksheet.getRow(1).font = { bold: true, size: 16 };
-        worksheet.getRow(2).font = { bold: true, size: 14 };
+        worksheet.getRow(8).font = { bold: true, size: 16 };
+        worksheet.getRow(9).font = { bold: true, size: 14 };
 
         // Add stats for each commenter
-        let rowIndex = 3;
+        let rowIndex = 10;
         commenters.forEach((commenter) => {
             const statRow = worksheet.addRow([commenter, reactionStats[commenter].text]);
             worksheet.getRow(rowIndex).font = { size: 14 };
@@ -434,11 +488,34 @@ async function renderPDF(repos, name) {
         console.info(
             `\nProcessing ${owner}/${repo} - Pull Request #${pullRequestNumber}`,
         );
-        const { rows, commenters, reactionStats } =
+        const { rows, commenters, reactionStats, stats } =
             await getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber);
 
         // Add a title for each PR
         htmlContent += `<h1>${owner}/${repo} - Pull Request #${pullRequestNumber}</h1>`;
+
+        // Add issues summary table
+        htmlContent += `
+          <h2>Issues Summary</h2>
+          <table class="summary-table">
+            <tr>
+              <th>Category</th>
+              <th>Count</th>
+            </tr>
+            <tr>
+              <td>Reported (✅)</td>
+              <td style="background-color: ${COLORS.GREEN.html}">${stats.reported}</td>
+            </tr>
+            <tr>
+              <td>Non-Reported (❌)</td>
+              <td style="background-color: ${COLORS.RED.html}">${stats.nonReported}</td>
+            </tr>
+            <tr>
+              <td>Pending</td>
+              <td style="background-color: ${COLORS.YELLOW.html}">${stats.pending}</td>
+            </tr>
+          </table>
+        `;
 
         // Add reaction stats summary table
         htmlContent += `
