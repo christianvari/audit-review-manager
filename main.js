@@ -1,6 +1,5 @@
 import { graphql } from "@octokit/graphql";
 import fs from "fs/promises";
-import ExcelJS from "exceljs";
 import dotenv from "dotenv";
 import puppeteer from "puppeteer";
 
@@ -8,10 +7,10 @@ dotenv.config();
 
 // Color constants for consistent styling
 const COLORS = {
-    GREEN: { excel: "CCFFCC", html: "#ccffcc" }, // High percentage/positive
-    YELLOW: { excel: "FFFFCC", html: "#ffffcc" }, // Medium-high percentage
-    ORANGE: { excel: "FFEB9C", html: "#ffeb9c" }, // Medium-low percentage
-    RED: { excel: "FFCCCC", html: "#ffcccc" }, // Low percentage/negative
+    GREEN: "#ccffcc", // High percentage/positive
+    YELLOW: "#ffffcc", // Medium-high percentage
+    ORANGE: "#ffeb9c", // Medium-low percentage
+    RED: "#ffcccc", // Low percentage/negative
 };
 
 // Thresholds for color transitions
@@ -268,163 +267,6 @@ function getEmoji(content) {
     return emojiMap[content.toUpperCase()] || content;
 }
 
-async function renderExcel(repos, name) {
-    const workbook = new ExcelJS.Workbook();
-    const generatedOn = formatDateTime(new Date()); // Get current date and time
-    let index = 0;
-
-    for (const { owner, repo, pullRequestNumber } of repos) {
-        console.info(
-            `\nProcessing ${owner}/${repo} - Pull Request #${pullRequestNumber}`,
-        );
-        const { rows, commenters, reactionStats, stats } =
-            await getPRReviewCommentsWithReactions(owner, repo, pullRequestNumber);
-
-        const worksheet = workbook.addWorksheet(
-            `${index}-${repo}-PR#${pullRequestNumber}`,
-        );
-
-        // Add date and time to the worksheet header
-        worksheet.headerFooter.oddHeader = `&CGenerated on ${generatedOn}`;
-
-        // Add issues summary table
-        worksheet.addRow(["Issues Summary"]);
-        worksheet.getRow(1).font = { bold: true, size: 18 };
-
-        worksheet.addRow(["Category", "Count"]);
-        worksheet.getRow(2).font = { bold: true, size: 16 };
-
-        // Add the stats rows
-        worksheet.addRow(["Reported (✅)", stats.reported]);
-        worksheet.addRow(["Non-Reported (❌)", stats.nonReported]);
-        worksheet.addRow(["Pending", stats.pending]);
-
-        // Style the stats cells
-        worksheet.getRow(3).font = { size: 14 };
-        worksheet.getRow(4).font = { size: 14 };
-        worksheet.getRow(5).font = { size: 14 };
-        worksheet.getRow(6).font = { size: 14, bold: true };
-
-        // Color cells based on category
-        worksheet.getRow(3).getCell(2).fill = {
-            type: "pattern",
-            pattern: "solid",
-            fgColor: { argb: COLORS.GREEN.excel },
-        };
-
-        worksheet.getRow(4).getCell(2).fill = {
-            type: "pattern",
-            pattern: "solid",
-            fgColor: { argb: COLORS.RED.excel },
-        };
-
-        worksheet.getRow(5).getCell(2).fill = {
-            type: "pattern",
-            pattern: "solid",
-            fgColor: { argb: COLORS.YELLOW.excel },
-        };
-
-        // Add a blank row as separator
-        worksheet.addRow([]);
-
-        // Add summary section for reaction stats
-        worksheet.addRow(["Reaction Completion Stats"]);
-        worksheet.addRow(["Reviewer", "Reactions Completed"]);
-
-        // Style the header
-        worksheet.getRow(8).font = { bold: true, size: 16 };
-        worksheet.getRow(9).font = { bold: true, size: 14 };
-
-        // Add stats for each commenter
-        let rowIndex = 10;
-        commenters.forEach((commenter) => {
-            const statRow = worksheet.addRow([commenter, reactionStats[commenter].text]);
-            worksheet.getRow(rowIndex).font = { size: 14 };
-
-            // Color the cell based on the percentage
-            const percentage = reactionStats[commenter].percentage;
-            const color = getColorForPercentage(percentage);
-            statRow.getCell(2).fill = {
-                type: "pattern",
-                pattern: "solid",
-                fgColor: { argb: color.excel },
-            };
-
-            rowIndex++;
-        });
-
-        // Add a blank row as separator
-        worksheet.addRow([]);
-        rowIndex++;
-
-        // Add headers for comments section
-        const headerRow = ["Comment", "Reported", ...commenters];
-        const headerRowIndex = rowIndex;
-        worksheet.addRow(headerRow);
-
-        // Style comment section header
-        worksheet.getRow(headerRowIndex).font = { bold: true, size: 16 };
-        worksheet.getRow(headerRowIndex).alignment = {
-            vertical: "middle",
-            horizontal: "center",
-            wrapText: true,
-        };
-
-        // Set column widths
-        worksheet.getColumn(1).width = 100;
-        headerRow.slice(1).forEach((_, index) => {
-            worksheet.getColumn(index + 2).width = 25;
-        });
-
-        // Add rows and hyperlinks
-        rows.forEach((dataRow) => {
-            const row = worksheet.addRow([
-                dataRow.Comment.text,
-                dataRow.Reported || "",
-                ...commenters.map((commenter) => dataRow[commenter] || ""),
-            ]);
-
-            row.font = { size: 16 };
-
-            // Format comment column as clickable hyperlink
-            const commentCell = row.getCell(1);
-            commentCell.value = {
-                text: dataRow.Comment.text,
-                hyperlink: dataRow.Comment.hyperlink,
-            };
-            commentCell.font = {
-                color: { argb: "FF0000FF" },
-                underline: true,
-                size: 16,
-            }; // Blue and underlined
-            row.alignment = { vertical: "middle", wrapText: true };
-
-            if (dataRow.thumbsUpCount + 1 >= (2 / 3) * commenters.length) {
-                row.fill = {
-                    type: "pattern",
-                    pattern: "solid",
-                    fgColor: { argb: COLORS.GREEN.excel },
-                };
-            }
-
-            // Highlight row in light red if > 2/3 of commenters gave a 👎
-            if (dataRow.thumbsDownCount >= (2 / 3) * (commenters.length - 1)) {
-                row.fill = {
-                    type: "pattern",
-                    pattern: "solid",
-                    fgColor: { argb: COLORS.RED.excel },
-                };
-            }
-        });
-
-        index++;
-    }
-
-    // Write workbook to file with the name "Review.xlsx"
-    await workbook.xlsx.writeFile(`${name}.xlsx`);
-    console.info(`Excel file created: ${name}.xlsx`);
-}
-
 async function renderPDF(repos, name) {
     const generatedOn = formatDateTime(new Date()); // Get current date and time
     let htmlContent = `
@@ -461,10 +303,10 @@ async function renderPDF(repos, name) {
           background-color: #f2f2f2;
         }
         .green-row {
-          background-color: ${COLORS.GREEN.html};
+          background-color: ${COLORS.GREEN};
         }
         .red-row {
-          background-color: ${COLORS.RED.html};
+          background-color: ${COLORS.RED};
         }
         a {
           color: #0066cc;
@@ -504,15 +346,15 @@ async function renderPDF(repos, name) {
             </tr>
             <tr>
               <td>Reported (✅)</td>
-              <td style="background-color: ${COLORS.GREEN.html}">${stats.reported}</td>
+              <td style="background-color: ${COLORS.GREEN}">${stats.reported}</td>
             </tr>
             <tr>
               <td>Non-Reported (❌)</td>
-              <td style="background-color: ${COLORS.RED.html}">${stats.nonReported}</td>
+              <td style="background-color: ${COLORS.RED}">${stats.nonReported}</td>
             </tr>
             <tr>
               <td>Pending</td>
-              <td style="background-color: ${COLORS.YELLOW.html}">${stats.pending}</td>
+              <td style="background-color: ${COLORS.YELLOW}">${stats.pending}</td>
             </tr>
           </table>
         `;
@@ -533,7 +375,7 @@ async function renderPDF(repos, name) {
             htmlContent += `
               <tr>
                 <td>${commenter}</td>
-                <td style="background-color: ${color.html}">${reactionStats[commenter].text}</td>
+                <td style="background-color: ${color}">${reactionStats[commenter].text}</td>
               </tr>
             `;
         });
@@ -607,7 +449,7 @@ async function renderPDF(repos, name) {
 }
 
 // Main function to process each PR from config
-async function main(configPath, format) {
+async function main(configPath) {
     const config = await loadConfig(configPath);
 
     const repos = config.repositories;
@@ -617,28 +459,18 @@ async function main(configPath, format) {
         return;
     }
 
-    if (format === "excel") {
-        await renderExcel(repos, config.name);
-    } else if (format === "pdf") {
-        await renderPDF(repos, config.name);
-    } else {
-        console.error(`Invalid format specified: ${format}`);
-    }
+    await renderPDF(repos, config.name);
 }
 
 // Parse command-line arguments
 const args = process.argv.slice(2);
 let configPath = "./config.json";
-let format = "pdf"; // Default format
 
 args.forEach((arg) => {
-    if (arg.startsWith("--format=")) {
-        format = arg.split("=")[1];
-    }
     if (arg.startsWith("--config-path=")) {
         configPath = arg.split("=")[1];
     }
 });
 
-// Run the main function with the provided config path and format
-main(configPath, format);
+// Run the main function with the provided config path
+main(configPath);

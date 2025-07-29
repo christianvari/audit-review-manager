@@ -1,6 +1,6 @@
 # GitHub Pull Request Review Reporter
 
-This script generates **Excel** or **PDF** reports of pull request review comments and their reactions from GitHub repositories. It fetches data using the GitHub GraphQL API and processes it to create comprehensive reports that highlight reviewer feedback, reactions, and the overall sentiment of comments on specified pull requests.
+This script generates **PDF** reports of pull request review comments and their reactions from GitHub repositories. It fetches data using the GitHub GraphQL API and processes it to create comprehensive reports that highlight reviewer feedback, reactions, and the overall sentiment of comments on specified pull requests.
 
 ## Table of Contents
 
@@ -14,8 +14,6 @@ This script generates **Excel** or **PDF** reports of pull request review commen
   - [Command-Line Arguments](#command-line-arguments)
   - [Examples](#examples)
 - [Output](#output)
-  - [Excel Report](#excel-report)
-  - [PDF Report](#pdf-report)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -23,7 +21,7 @@ This script generates **Excel** or **PDF** reports of pull request review commen
 
 - **Fetches pull request review comments and reactions** using the GitHub GraphQL API.
 - Supports **multiple repositories and pull requests** specified in a configuration file.
-- Generates reports in either **Excel** or **PDF** format.
+- Generates reports in **PDF** format.
 - **Highlights comments** based on the number of positive or negative reactions.
 - Provides **hyperlinks** to the original comments on GitHub for easy reference.
 
@@ -104,19 +102,13 @@ Create a `config.json` file in the root directory of the project to specify the 
 
 ## Usage
 
-Run the script using Node.js, optionally specifying command-line arguments for format and configuration path.
+Run the script using Node.js, optionally specifying the configuration file path.
 
 ```bash
-node main.js [--format=pdf|excel] [--config-path=path/to/config.json]
+node main.js [--config-path=path/to/config.json]
 ```
 
 ### Command-Line Arguments
-
-- `--format`: Specifies the output format. Accepts `pdf` or `excel`. Default is `pdf`.
-
-  ```bash
-  --format=pdf
-  ```
 
 - `--config-path`: Specifies the path to the configuration file. Default is `./config.json`.
 
@@ -132,30 +124,15 @@ node main.js [--format=pdf|excel] [--config-path=path/to/config.json]
   node main.js
   ```
 
-- **Generate an Excel Report with Custom Config Path**
+- **Generate a PDF Report with Custom Config Path**
 
   ```bash
-  node main.js --format=excel --config-path=./myconfig.json
+  node main.js --config-path=./myconfig.json
   ```
 
 ## Output
 
-The script will generate an output file named `{name}.pdf` or `{name}.xlsx` based on the `name` specified in your `config.json`.
-
-### Excel Report
-
-- **Structure:**
-
-  - Each repository and pull request combination will have its own worksheet.
-  - Columns include:
-    - `Comment`: The truncated comment text with a hyperlink to the original comment.
-    - `Reported`: Indicates the status of the comment (`✅`, `❌`, or `⚠️`).
-    - Usernames of commenters and their reactions.
-
-- **Highlights:**
-
-  - Rows are highlighted in **green** if more than two-thirds of commenters reacted positively (`👍`).
-  - Rows are highlighted in **red** if more than two-thirds of commenters reacted negatively (`👎`).
+The script will generate a PDF file named `{name}.pdf` based on the `name` specified in your `config.json`.
 
 ### PDF Report
 
